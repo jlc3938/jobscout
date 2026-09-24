@@ -15,20 +15,26 @@ Do not add auto-apply, LinkedIn/Indeed scraping, or anything that submits forms.
   and Workday's career-site JSON endpoint; filters by title regex and location; stores
   matches in SQLite (`jobs.db`, table `jobs`) with full descriptions; exports new matches
   to `output/new_jobs_<date>.csv`.
-- Commands: `run`, `check`, `list [--status]`, `mark <id> <status>`.
-- `companies.toml`: filters and the company list. Starter company tokens have not been
-  verified against live boards yet; run `python jobscout.py check` and fix FAIL rows.
-- Tested only with mocked responses so far.
+- Commands: `run`, `check`, `score [--limit N] [--rescore] [--id]`, `report [--open]`, `digest [--dry-run]`, `daily`, `list [--status] [--min-score]`, `mark <id> <status>`.
+- `report` renders `report_template.html` with the jobs table embedded as JSON into
+  `output/jobs.html` (self-contained, no server); `run` regenerates it after each fetch.
+- `companies.toml`: filters, scoring settings, and the company list. Run
+  `python jobscout.py check` after editing companies and fix FAIL rows.
+- `digest` emails new, not-yet-emailed jobs (column `emailed_at`) via Gmail SMTP; addresses and
+  the app password come from `.env` (see `.env.example`), never `companies.toml`. `daily` = run +
+  digest and is what the 7 AM launchd job calls.
+- `check` verified against live boards (2026-09-23). `score` tested only with a mocked client so far.
 
-## Planned next step: scoring
-Add a `score` command that sends each new job's description plus Jose's resume to the
-Claude API (Anthropic Python SDK, API key from the ANTHROPIC_API_KEY environment variable)
-and stores a fit score (0-100), top matching points, gaps, and a tailored summary in `jobs.db`.
-Two resume variants live in `resumes/`: Platform EM and AI Platform EM; the scorer should
-pick the better fit per job. Resumes are git-ignored (personal data): never commit them;
-the repo is public.
+## Scoring
+`score` sends each new, unscored job plus every resume in `resumes/` to the Claude API
+(Anthropic Python SDK, key from ANTHROPIC_API_KEY) using structured outputs, and stores
+score (0-100), resume (chosen variant), matches, gaps (JSON lists), summary, and scored_at
+in `jobs.db`. Resumes and instructions form a cached system prompt shared by every job.
+Model, effort, and the candidate's preferences live under `[scoring]` in `companies.toml`.
+Resumes are git-ignored (personal data): never commit them; the repo is public.
 
 ## Conventions
+- Keep README.md (overview) and COMMANDS.md (full command reference) in sync with jobscout.py.
 - Python 3.11+, dependencies kept minimal (`requests`, `anthropic`).
 - Never commit `jobs.db`, `output/`, `.env`, or API keys.
 - Development happens on Windows.

@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jobscout</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1d2330; --muted: #5d6677; --line: #e2e5ea;
+    --accent: #2f5bd3; --chip: #eef1f6; --good: #1f7a4d; --ok: #8a6d00; --weak: #a33a3a;
+    --good-bg: #e3f4ea; --ok-bg: #fbf1d2; --weak-bg: #f8e3e3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #13161c; --card: #1c2029; --text: #e6e9ef; --muted: #9aa3b2; --line: #2c323d;
+      --accent: #7b9cff; --chip: #262b36; --good: #6fd29c; --ok: #e5c35a; --weak: #f08c8c;
+      --good-bg: #1d3a2b; --ok-bg: #3a3218; --weak-bg: #3d2224;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 920px; margin: 0 auto; padding: 24px 16px 64px; }
+  header h1 { margin: 0; font-size: 22px; }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0 8px; position: sticky; top: 0;
+              background: var(--bg); padding: 8px 0; z-index: 1; }
+  .controls input, .controls select { font: inherit; color: var(--text); background: var(--card);
+              border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; }
+  .controls input { flex: 1 1 220px; min-width: 0; }
+  .count { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+          padding: 16px 18px; margin-bottom: 12px; }
+  .top { display: flex; gap: 14px; align-items: flex-start; }
+  .score { flex: none; width: 48px; height: 48px; border-radius: 10px; display: grid; place-items: center;
+           font-weight: 700; font-size: 18px; background: var(--chip); color: var(--muted); }
+  .score.good { background: var(--good-bg); color: var(--good); }
+  .score.ok { background: var(--ok-bg); color: var(--ok); }
+  .score.weak { background: var(--weak-bg); color: var(--weak); }
+  .head { flex: 1; min-width: 0; }
+  .company { font-size: 13px; color: var(--muted); font-weight: 600; }
+  .title { font-size: 17px; font-weight: 600; margin: 2px 0 6px; overflow-wrap: anywhere; }
+  .title a { color: var(--text); text-decoration: none; }
+  .title a:hover { color: var(--accent); text-decoration: underline; }
+  .meta { display: flex; flex-wrap: wrap; gap: 6px; font-size: 12.5px; }
+  .chip { background: var(--chip); border-radius: 999px; padding: 2px 9px; color: var(--muted); }
+  .chip.status { color: var(--accent); font-weight: 600; }
+  .fit { margin: 12px 0 0; font-size: 14px; }
+  .fit p { margin: 0 0 6px; }
+  .fit ul { margin: 0 0 6px; padding-left: 20px; }
+  .fit li.gap { color: var(--weak); }
+  details { margin-top: 10px; }
+  summary { cursor: pointer; color: var(--accent); font-size: 13.5px; }
+  .desc { white-space: pre-wrap; font-size: 13.5px; color: var(--muted); margin-top: 8px;
+          max-height: 480px; overflow: auto; border-top: 1px solid var(--line); padding-top: 8px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; font-size: 12.5px; color: var(--muted); }
+  .actions button { font: inherit; color: var(--muted); background: none; border: 1px solid var(--line);
+                    border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+  .actions button:hover { color: var(--accent); border-color: var(--accent); }
+  .empty { text-align: center; color: var(--muted); padding: 48px 0; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>jobscout</h1>
+    <p id="generated"></p>
+  </header>
+  <div class="controls">
+    <input id="q" type="search" placeholder="Search title, company, description" aria-label="Search">
+    <select id="status" aria-label="Status"></select>
+    <select id="where" aria-label="Location">
+      <option value="">Any location</option>
+      <option value="dfw">DFW area</option>
+      <option value="remote">Remote</option>
+      <option value="other">Other / unclear</option>
+    </select>
+    <select id="company" aria-label="Company"></select>
+  </div>
+  <p class="count" id="count"></p>
+  <div id="list"></div>
+</main>
+<script id="data" type="application/json">__JOBS_JSON__</script>
+<script>
+const data = JSON.parse(document.getElementById("data").textContent);
+const jobs = data.jobs;
+const $ = (id) => document.getElementById(id);
+$("generated").textContent = `Generated ${data.generated} · ${jobs.length} jobs tracked`;
+
+function fillSelect(el, label, values, selected) {
+  el.innerHTML = "";
+  el.append(new Option(label, ""));
+  for (const v of values) el.append(new Option(v, v, false, v === selected));
+}
+const statuses = [...new Set(jobs.map((j) => j.status))].sort();
+fillSelect($("status"), "Any status", statuses, statuses.includes("new") ? "new" : "");
+fillSelect($("company"), "Any company", [...new Set(jobs.map((j) => j.company))].sort());
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+
+function card(j) {
+  const c = el("article", "card");
+  const top = el("div", "top");
+  const s = el("div", "score", j.score == null ? "–" : j.score);
+  if (j.score != null) s.classList.add(j.score >= 85 ? "good" : j.score >= 70 ? "ok" : "weak");
+  s.title = j.score == null ? "Not scored yet" : "Fit score";
+  const head = el("div", "head");
+  head.append(el("div", "company", j.company));
+  const t = el("div", "title");
+  const a = el("a", null, j.title);
+  a.href = j.url; a.target = "_blank"; a.rel = "noopener";
+  t.append(a);
+  head.append(t);
+  const meta = el("div", "meta");
+  meta.append(el("span", "chip status", j.status));
+  if (j.location) meta.append(el("span", "chip", j.location));
+  if (j.posted) meta.append(el("span", "chip", "Posted " + j.posted));
+  meta.append(el("span", "chip", "Found " + j.first_seen));
+  if (j.resume) meta.append(el("span", "chip", "Resume: " + j.resume));
+  head.append(meta);
+  top.append(s, head);
+  c.append(top);
+
+  if (j.summary || (j.matches && j.matches.length) || (j.gaps && j.gaps.length)) {
+    const fit = el("div", "fit");
+    if (j.summary) fit.append(el("p", null, j.summary));
+    const ul = el("ul");
+    for (const m of j.matches || []) ul.append(el("li", null, m));
+    for (const g of j.gaps || []) ul.append(el("li", "gap", "Gap: " + g));
+    if (ul.children.length) fit.append(ul);
+    c.append(fit);
+  }
+  if (j.description) {
+    const d = el("details");
+    d.append(el("summary", null, "Show description"));
+    d.addEventListener("toggle", () => {
+      if (d.open && !d.querySelector(".desc")) d.append(el("div", "desc", j.description));
+    });
+    c.append(d);
+  }
+  const actions = el("div", "actions");
+  for (const st of ["applied", "skipped"]) {
+    const b = el("button", null, `Copy "mark ${st}"`);
+    b.onclick = async () => {
+      try { await navigator.clipboard.writeText(`python jobscout.py mark ${j.id} ${st}`); b.textContent = "Copied"; }
+      catch { b.textContent = j.id; }
+      setTimeout(() => (b.textContent = `Copy "mark ${st}"`), 1500);
+    };
+    actions.append(b);
+  }
+  c.append(actions);
+  return c;
+}
+
+function render() {
+  const q = $("q").value.trim().toLowerCase();
+  const status = $("status").value, where = $("where").value, company = $("company").value;
+  const shown = jobs.filter((j) =>
+    (!status || j.status === status) && (!where || j.where === where) &&
+    (!company || j.company === company) &&
+    (!q || `${j.title} ${j.company} ${j.location} ${j.description}`.toLowerCase().includes(q)));
+  $("count").textContent = `Showing ${shown.length} of ${jobs.length}`;
+  const list = $("list");
+  list.innerHTML = "";
+  if (!shown.length) list.append(el("div", "empty", "No jobs match these filters."));
+  for (const j of shown) list.append(card(j));
+}
+for (const id of ["q", "status", "where", "company"]) $(id).addEventListener("input", render);
+render();
+</script>
+</body>
+</html>

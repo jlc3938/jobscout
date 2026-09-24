@@ -37,6 +37,27 @@ keep_unknown_location = true
 workday_search = ["engineering manager", "software engineering manager", "director of engineering"]
 
 # ---------------------------------------------------------------------------
+# Scoring (python jobscout.py score) - needs ANTHROPIC_API_KEY and resumes in resumes/
+# ---------------------------------------------------------------------------
+[scoring]
+model = "claude-opus-5"
+effort = "high"          # low | medium | high | xhigh | max (lower = cheaper, faster)
+# What you're looking for, in plain words. Sent to Claude alongside your resumes.
+profile = """
+Engineering Manager roles in platform engineering, infrastructure, CI/CD, developer
+experience, or AI/ML platform teams. People-manager roles only, not IC.
+Location: DFW area onsite/hybrid (McKinney, Plano, Frisco, Dallas and nearby) or US-remote.
+"""
+
+# ---------------------------------------------------------------------------
+# Email digest (python jobscout.py digest). Addresses and the Gmail app password
+# go in .env, never here - this file is committed.
+# ---------------------------------------------------------------------------
+[digest]
+min_score = 0     # once scoring is on, e.g. 70; unscored jobs are always included
+max_jobs = 15     # jobs listed in the email body; the rest are in the attached report
+
+# ---------------------------------------------------------------------------
 # Companies
 # Find a company's board from its careers page links:
 #   boards.greenhouse.io/<token>  or job-boards.greenhouse.io/<token>  -> ats = "greenhouse"
