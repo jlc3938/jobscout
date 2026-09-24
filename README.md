@@ -13,14 +13,26 @@ check -> run -> (score) -> report / digest -> you review and apply -> mark
 ```
 python3 -m venv .venv                        # Python 3.11+
 .venv/bin/pip install -r requirements.txt    # Windows: .venv\Scripts\pip install -r requirements.txt
-python jobscout.py check                     # confirm every company in companies.toml resolves
+# put your resume(s) in resumes/ first
+python jobscout.py setup                     # build your search from your resume
 python jobscout.py run                       # first run: every current match is "new"
 python jobscout.py report --open             # browse what it found
 ```
 
 Put your own resumes (`.docx`, `.md`, or `.txt`) in `resumes/`. They are git-ignored and never
-committed, because they contain personal contact details. For the email digest, copy `.env.example`
-to `.env` and fill in your Gmail address and app password.
+committed, because they contain personal contact details.
+
+`setup` asks where you'd work and whether remote is OK. With `ANTHROPIC_API_KEY` set, Claude then
+reads your resume and drafts the job titles to match, locations, a description of what you want,
+and 15-25 companies to watch; every company is checked against its live job board and wrong guesses
+are dropped. Without a key (or with `--manual`), it asks for the titles instead and starts from the
+example company list. You review the draft before it's saved to `search.toml`.
+No API key and rather not answer questions? [COMMANDS.md](COMMANDS.md#or-create-searchtoml-in-claude-chat)
+has a prompt you can paste into Claude chat, with your resume attached, to write `search.toml` for you.
+It also has a [job-ranking prompt](COMMANDS.md#or-rank-jobs-in-claude-chat): attach your resume and
+`output/jobs.html` and Claude chat ranks the new jobs the same way `score` does.
+
+For the email digest, copy `.env.example` to `.env` and fill in your Gmail address and app password.
 
 Everything is stored in `jobs.db` (SQLite) and `output/`, both git-ignored.
 
@@ -28,7 +40,8 @@ Everything is stored in `jobs.db` (SQLite) and `output/`, both git-ignored.
 
 | Command | What it does |
 |---|---|
-| `check` | Confirm every company in `companies.toml` resolves |
+| `setup [--manual]` | Build your `search.toml` from your resume |
+| `check` | Confirm every company in `search.toml` resolves |
 | `run` | Fetch postings, filter them, save new matches, refresh the report |
 | `score [--limit N] [--rescore] [--id ID]` | Rate new jobs against your resumes with Claude |
 | `report [--open]` | Write `output/jobs.html`: search, filters, descriptions, scores |
@@ -40,14 +53,15 @@ Everything is stored in `jobs.db` (SQLite) and `output/`, both git-ignored.
 **[COMMANDS.md](COMMANDS.md)** explains every command, option, setting, and file in detail.
 
 ## Configuration
-`companies.toml` holds everything except secrets:
+`search.toml` is your search. `setup` creates it; it's git-ignored, so your preferences stay on your
+machine. `search.example.toml` is a filled-in example. It holds everything except secrets:
 
 - `[filters]`: title patterns to include and exclude, target locations, remote rules.
 - `[scoring]`: Claude model, effort level, and a plain-words description of what you're looking for.
 - `[digest]`: minimum score and how many jobs to list in the email.
 - `[[company]]`: one entry per company board (see below).
 
-Secrets go in `.env` (email) or environment variables (`ANTHROPIC_API_KEY`), never in `companies.toml`.
+Secrets go in `.env` (email) or environment variables (`ANTHROPIC_API_KEY`), never in `search.toml`.
 
 ## Adding companies
 Open a company's careers page and look at where a job link points:

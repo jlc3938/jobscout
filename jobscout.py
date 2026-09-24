@@ -8,8 +8,9 @@ Supported boards: Greenhouse, Lever, Ashby (official public APIs) and
 Workday (the JSON endpoint its career sites call).
 
 Usage:
+  python jobscout.py setup [--manual] # build search.toml from your resume (Claude or questionnaire)
   python jobscout.py run              # fetch, filter, save, export new matches to CSV
-  python jobscout.py check            # verify every company in companies.toml resolves
+  python jobscout.py check            # verify every company in search.toml resolves
   python jobscout.py score [--limit N] [--rescore] [--id JOB_ID]
                                       # rate new jobs against your resumes with Claude
   python jobscout.py report [--open]  # write output/jobs.html (run also refreshes it)
@@ -19,6 +20,7 @@ Usage:
   python jobscout.py mark <job_id> <status>   # e.g. applied, skipped, interviewing
 """
 import argparse
+import concurrent.futures
 import csv
 import html
 import json
@@ -44,7 +46,8 @@ except ModuleNotFoundError:  # pragma: no cover
 import requests
 
 HERE = Path(__file__).resolve().parent
-CONFIG = HERE / "companies.toml"
+CONFIG = HERE / "search.toml"
+EXAMPLE_CONFIG = HERE / "search.example.toml"
 DB = HERE / "jobs.db"
 OUT_DIR = HERE / "output"
 RESUME_DIR = HERE / "resumes"
@@ -268,6 +271,26 @@ Return:
   tailored to this job, using only facts from the resume. No invented numbers."""
 
 
+def ask_claude(client, model, system, prompt, output_format, effort="high"):
+    """One structured-output request. Returns the parsed object, or None on refusal."""
+    import anthropic
+    try:
+        resp = client.beta.messages.parse(
+            model=model,
+            max_tokens=16000,
+            system=system,
+            messages=[{"role": "user", "content": prompt}],
+            thinking={"type": "adaptive"},
+            output_config={"effort": effort},
+            output_format=output_format,
+            betas=["server-side-fallback-2026-07-01"],
+            fallbacks="default",
+        )
+    except anthropic.AuthenticationError:
+        sys.exit("Authentication failed: set ANTHROPIC_API_KEY to a valid key.")
+    return None if resp.stop_reason == "refusal" else resp.parsed_output
+
+
 def resume_text(path):
     if path.suffix.lower() == ".docx":
         root = ET.fromstring(zipfile.ZipFile(path).read("word/document.xml"))
@@ -299,6 +322,203 @@ def job_prompt(row):
     company, title, location, url, description = row
     return (f"<job>\nCompany: {company}\nTitle: {title}\nLocation: {location}\nURL: {url}\n\n"
             f"{description or '(no description available)'}\n</job>")
+
+
+# ---------------------------------------------------------------- setup
+SETUP_INSTRUCTIONS = """You configure a job-search tool for the person whose resume(s) you are
+given. The tool fetches postings from company job boards and keeps a posting only if its title
+matches at least one title_include regex and no title_exclude regex (Python `re`, case-insensitive,
+searched anywhere in the title), and its location passes the location rules. Build a search that
+catches every posting this person would realistically apply to, at their current level and one
+step up, without flooding them with unrelated roles.
+
+Return:
+- title_include: 4-10 regexes. Cover common title variants, e.g. "engineering manager",
+  "manager,? (of )?(software )?engineering", "(platform|infrastructure) .*manager".
+- title_exclude: regexes for roles that would slip past title_include but don't fit (e.g. "intern",
+  "sales", "product manager" for an engineering manager).
+- workday_search: 2-4 short search phrases for Workday boards, which need search terms.
+- locations: lowercase substrings that identify acceptable onsite/hybrid locations: each city the
+  person named, nearby suburbs in the same metro, and the state as it appears in postings (e.g.
+  "texas", ", tx"). Empty if they only want remote.
+- remote_exclude: lowercase regions that make a remote posting ineligible for someone working
+  from the person's country (e.g. "canada", "emea", "india" for a US-based person).
+- profile: 2-4 plain sentences describing the roles, level, domain, and location this person wants.
+  It is shown to the model that scores jobs, so be specific.
+- companies: 15-25 companies likely to hire for these roles, weighted toward the person's domain
+  and location. Only companies using Greenhouse, Lever, or Ashby. For each, give the ats and your
+  best guess at the board token (the slug in boards.greenhouse.io/<token>, jobs.lever.co/<token>,
+  or jobs.ashbyhq.com/<token>). Every guess is checked against the live board; wrong ones are dropped."""
+
+DEFAULT_TITLE_EXCLUDE = ["intern", "sales", "account", "marketing", "recruit", "customer success",
+                         "product manager", "program manager", "project manager"]
+DEFAULT_REMOTE_EXCLUDE = ["canada", "uk", "united kingdom", "london", "europe", "emea", "india",
+                          "apac", "australia", "germany", "ireland", "brazil", "latam", "singapore"]
+
+
+def ask(prompt, default=""):
+    ans = input(f"{prompt}{f' [{default}]' if default else ''}: ").strip()
+    return ans or default
+
+
+def ask_yes(prompt, default=True):
+    ans = input(f"{prompt} [{'Y/n' if default else 'y/N'}]: ").strip().lower()
+    return default if not ans else ans.startswith("y")
+
+
+def split_list(text):
+    return [x.strip() for x in text.split(",") if x.strip()]
+
+
+def title_regex(title):
+    """'Engineering Manager' -> r'engineering\s+manager' (any spacing, any case)."""
+    return r"\s+".join(re.escape(w) for w in title.lower().split())
+
+
+def find_board(name, ats, token):
+    """Try the suggested board first, then the other ATSes with the same token."""
+    for kind in [ats] + [k for k in ("greenhouse", "lever", "ashby") if k != ats]:
+        c = {"name": name, "ats": kind, "token": token}
+        try:
+            n = len(fetch(c, {}))
+        except Exception:
+            continue
+        return c, n
+    return None, 0
+
+
+def verify_companies(suggested):
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(lambda c: find_board(c["name"], c["ats"], c["token"]), suggested))
+    kept = []
+    for s, (c, n) in zip(suggested, results):
+        if c:
+            kept.append(c)
+            print(f"  OK       {c['name']:<24} {c['ats']:<10} {n} postings")
+        else:
+            print(f"  dropped  {s['name']:<24} no board found for token '{s['token']}'")
+    return kept
+
+
+def draft_with_claude(resumes, locations, allow_remote, notes, model):
+    from typing import Literal
+    import anthropic
+    from pydantic import BaseModel
+
+    class Company(BaseModel):
+        name: str
+        ats: Literal["greenhouse", "lever", "ashby"]
+        token: str
+
+    class Search(BaseModel):
+        title_include: list[str]
+        title_exclude: list[str]
+        workday_search: list[str]
+        locations: list[str]
+        remote_exclude: list[str]
+        profile: str
+        companies: list[Company]
+
+    resume_blocks = "\n\n".join(f'<resume name="{n}">\n{t}\n</resume>' for n, t in resumes.items())
+    prompt = (f"{resume_blocks}\n\n<preferences>\n"
+              f"Onsite/hybrid locations: {', '.join(locations) or 'none, remote only'}\n"
+              f"Open to remote: {'yes' if allow_remote else 'no'}\n"
+              f"Other notes: {notes or 'none'}\n</preferences>")
+    print(f"\nAsking {model} to draft your search from {len(resumes)} resume(s)...")
+    try:
+        draft = ask_claude(anthropic.Anthropic(), model, SETUP_INSTRUCTIONS, prompt, Search)
+    except (anthropic.APIStatusError, anthropic.APIConnectionError) as e:
+        sys.exit(f"Claude request failed: {e}")
+    if draft is None:
+        sys.exit("Claude declined to draft a search. Run `setup --manual` instead.")
+
+    def valid(patterns):
+        out = []
+        for p_ in patterns:
+            try:
+                re.compile(p_)
+                out.append(p_)
+            except re.error:
+                print(f"  skipping invalid regex: {p_}")
+        return out
+
+    search = draft.model_dump()
+    search["title_include"] = valid(search["title_include"])
+    search["title_exclude"] = valid(search["title_exclude"])
+    search["locations"] = [l.lower() for l in search["locations"]]
+    search["remote_exclude"] = [l.lower() for l in search["remote_exclude"]]
+    return search
+
+
+def draft_manually(locations, notes):
+    print("\nWhich job titles should match? Comma-separated, e.g.")
+    print("  engineering manager, director of engineering, head of platform")
+    titles = []
+    while not titles:
+        titles = split_list(ask("Titles"))
+    exclude = split_list(ask("Words that rule a title out (comma-separated)",
+                             ", ".join(DEFAULT_TITLE_EXCLUDE)))
+    example = tomllib.loads(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
+    return {
+        "title_include": [title_regex(t) for t in titles],
+        "title_exclude": [title_regex(t) for t in exclude],
+        "workday_search": titles[:3],
+        "locations": [l.lower() for l in locations],
+        "remote_exclude": DEFAULT_REMOTE_EXCLUDE,
+        "profile": notes or f"Roles titled {', '.join(titles)}.",
+        # No resume-based suggestions without Claude: start from the example company list.
+        "companies": example.get("company", []),
+    }
+
+
+def toml_value(v):
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return str(v)
+    if isinstance(v, str):
+        return json.dumps(v)  # a JSON string is a valid TOML basic string
+    items = [toml_value(x) for x in v]
+    one_line = "[" + ", ".join(items) + "]"
+    if len(one_line) <= 90:
+        return one_line
+    return "[\n" + "".join(f"  {x},\n" for x in items) + "]"
+
+
+def write_search(path, search, allow_remote, scoring, digest):
+    filters = {
+        "title_include": search["title_include"], "title_exclude": search["title_exclude"],
+        "locations": search["locations"], "allow_remote": allow_remote,
+        "remote_exclude": search["remote_exclude"], "keep_unknown_location": True,
+        "workday_search": search["workday_search"],
+    }
+    lines = ["# Your job search, created by `python jobscout.py setup`. Edit freely.",
+             "# Run `python jobscout.py check` after changing companies.", "", "[filters]"]
+    lines += [f"{k} = {toml_value(v)}" for k, v in filters.items()]
+    lines += ["", "[scoring]"] + [f"{k} = {toml_value(v)}" for k, v in scoring.items()]
+    lines += [f"profile = {toml_value(search['profile'])}", "", "[digest]"]
+    lines += [f"{k} = {toml_value(v)}" for k, v in digest.items()]
+    for c in search["companies"]:
+        lines += ["", "[[company]]"] + [f"{k} = {toml_value(v)}" for k, v in c.items()]
+    text = "\n".join(lines) + "\n"
+    tomllib.loads(text)  # refuse to write a file jobscout can't read back
+    path.write_text(text, encoding="utf-8")
+
+
+def show_search(search, allow_remote):
+    plain = lambda pats: [p_.replace(r"\s+", " ") for p_ in pats]
+    search = dict(search, title_include=plain(search["title_include"]),
+                  title_exclude=plain(search["title_exclude"]))
+    print("\nDraft search")
+    print("  Titles that match:  " + "\n                      ".join(search["title_include"]))
+    print("  Titles ruled out:   " + ", ".join(search["title_exclude"]))
+    print("  Locations:          " + (", ".join(search["locations"]) or "(remote only)"))
+    print("  Remote:             " + ("yes" if allow_remote else "no")
+          + (f", except {', '.join(search['remote_exclude'])}" if allow_remote else ""))
+    print("  Workday search:     " + ", ".join(search["workday_search"]))
+    print("  Profile:            " + search["profile"])
+    print(f"  Companies ({len(search['companies'])}): "
+          + ", ".join(c["name"] for c in search["companies"]))
 
 
 # ---------------------------------------------------------------- report
@@ -432,6 +652,9 @@ def send_digest(cfg, dry_run=False):
 
 # ---------------------------------------------------------------- commands
 def load_config():
+    if not CONFIG.exists():
+        sys.exit(f"No {CONFIG.name} yet. Run `python jobscout.py setup` to create one from your "
+                 f"resume, or copy {EXAMPLE_CONFIG.name} to {CONFIG.name}.")
     with open(CONFIG, "rb") as f:
         return tomllib.load(f)
 
@@ -479,7 +702,7 @@ def cmd_run(_):
     else:
         print("No new matching jobs.")
     if failures:
-        print("\nCompanies that failed (check token/host in companies.toml):")
+        print("\nCompanies that failed (check token/host in search.toml):")
         for f_ in failures:
             print("  " + f_)
     write_report(cfg)
@@ -531,25 +754,13 @@ def cmd_score(a):
     for i, (job_id, *job_fields) in enumerate(rows, 1):
         label = f"[{job_fields[0]}] {job_fields[1]}"
         try:
-            resp = client.beta.messages.parse(
-                model=model,
-                max_tokens=16000,
-                system=system,
-                messages=[{"role": "user", "content": job_prompt(job_fields)}],
-                thinking={"type": "adaptive"},
-                output_config={"effort": cfg.get("effort", "high")},
-                output_format=Fit,
-                betas=["server-side-fallback-2026-07-01"],
-                fallbacks="default",
-            )
-        except anthropic.AuthenticationError:
-            sys.exit("Authentication failed: set ANTHROPIC_API_KEY to a valid key.")
+            fit = ask_claude(client, model, system, job_prompt(job_fields), Fit,
+                             cfg.get("effort", "high"))
         except (anthropic.APIStatusError, anthropic.APIConnectionError) as e:
             print(f"  {i}/{len(rows)} FAILED {label}: {e}")
             continue
-        fit = resp.parsed_output
-        if resp.stop_reason == "refusal" or fit is None:
-            print(f"  {i}/{len(rows)} SKIPPED {label}: no usable answer ({resp.stop_reason})")
+        if fit is None:
+            print(f"  {i}/{len(rows)} SKIPPED {label}: Claude declined to score it")
             continue
         score = max(0, min(100, fit.score))
         con.execute(
@@ -571,6 +782,48 @@ def cmd_score(a):
         w.writerow(["score", "resume", "id", "company", "title", "location", "url", "summary"])
         w.writerows(done)
     print(f"\nScored {len(done)} job(s) -> {path}")
+
+
+def cmd_setup(a):
+    resumes = load_resumes()
+    print(f"Found {len(resumes)} resume(s) in {RESUME_DIR.name}/: {', '.join(resumes)}")
+    if CONFIG.exists() and not ask_yes(f"{CONFIG.name} already exists. Replace it?", default=False):
+        return
+
+    print("\nWhere would you work onsite or hybrid? Comma-separated cities, or leave blank for")
+    print("remote only. Example: McKinney, Plano, Dallas")
+    locations = split_list(ask("Cities"))
+    allow_remote = ask_yes("Open to remote roles?")
+    if not locations and not allow_remote:
+        sys.exit("You need at least one city or remote, or nothing will match.")
+    notes = ask("Anything else about what you want? (optional, e.g. 'people manager only, AI "
+                "platform teams')")
+
+    use_claude = not a.manual and bool(os.environ.get("ANTHROPIC_API_KEY"))
+    if not a.manual and not use_claude:
+        print("\nANTHROPIC_API_KEY isn't set, so setup will ask for titles instead of reading "
+              "your resume.")
+    old = tomllib.loads(CONFIG.read_text(encoding="utf-8")) if CONFIG.exists() else {}
+    scoring = {"model": old.get("scoring", {}).get("model", DEFAULT_MODEL),
+               "effort": old.get("scoring", {}).get("effort", "high")}
+    digest = old.get("digest", {"min_score": 0, "max_jobs": 15})
+
+    if use_claude:
+        search = draft_with_claude(resumes, locations, allow_remote, notes, scoring["model"])
+        print(f"\nChecking {len(search['companies'])} suggested companies against live job boards...")
+        search["companies"] = verify_companies(search["companies"])
+    else:
+        search = draft_manually(locations, notes)
+
+    show_search(search, allow_remote)
+    if not search["title_include"]:
+        sys.exit("\nNo usable title patterns; nothing saved. Try again or use --manual.")
+    if not ask_yes(f"\nSave to {CONFIG.name}?"):
+        print("Nothing saved.")
+        return
+    write_search(CONFIG, search, allow_remote, scoring, digest)
+    print(f"Saved {CONFIG}. Next: `python jobscout.py run`, then `report --open`.")
+    print(f"Edit {CONFIG.name} any time to adjust titles, locations, or companies.")
 
 
 def cmd_digest(a):
@@ -624,6 +877,10 @@ def cmd_mark(a):
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
+    su = sub.add_parser("setup")
+    su.add_argument("--manual", action="store_true",
+                    help="answer questions instead of having Claude read your resume")
+    su.set_defaults(fn=cmd_setup)
     sub.add_parser("run").set_defaults(fn=cmd_run)
     sub.add_parser("check").set_defaults(fn=cmd_check)
     sc = sub.add_parser("score")

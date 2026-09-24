@@ -18,10 +18,12 @@ Do not add auto-apply, LinkedIn/Indeed scraping, or anything that submits forms.
 - Commands: `run`, `check`, `score [--limit N] [--rescore] [--id]`, `report [--open]`, `digest [--dry-run]`, `daily`, `list [--status] [--min-score]`, `mark <id> <status>`.
 - `report` renders `report_template.html` with the jobs table embedded as JSON into
   `output/jobs.html` (self-contained, no server); `run` regenerates it after each fetch.
-- `companies.toml`: filters, scoring settings, and the company list. Run
-  `python jobscout.py check` after editing companies and fix FAIL rows.
+- `search.toml` (git-ignored, per user): filters, scoring and digest settings, company list.
+  `setup` creates it from the user's resume (Claude drafts it when ANTHROPIC_API_KEY is set,
+  otherwise a questionnaire) and verifies suggested companies against live boards.
+  `search.example.toml` is the committed example. Run `check` after editing companies.
 - `digest` emails new, not-yet-emailed jobs (column `emailed_at`) via Gmail SMTP; addresses and
-  the app password come from `.env` (see `.env.example`), never `companies.toml`. `daily` = run +
+  the app password come from `.env` (see `.env.example`), never `search.toml`. `daily` = run +
   digest and is what the 7 AM launchd job calls.
 - `check` verified against live boards (2026-09-23). `score` tested only with a mocked client so far.
 
@@ -30,7 +32,7 @@ Do not add auto-apply, LinkedIn/Indeed scraping, or anything that submits forms.
 (Anthropic Python SDK, key from ANTHROPIC_API_KEY) using structured outputs, and stores
 score (0-100), resume (chosen variant), matches, gaps (JSON lists), summary, and scored_at
 in `jobs.db`. Resumes and instructions form a cached system prompt shared by every job.
-Model, effort, and the candidate's preferences live under `[scoring]` in `companies.toml`.
+Model, effort, and the candidate's preferences live under `[scoring]` in `search.toml`.
 Resumes are git-ignored (personal data): never commit them; the repo is public.
 
 ## Conventions

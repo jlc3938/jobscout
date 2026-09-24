@@ -1,3 +1,7 @@
+# Example search. Don't edit this file: run `python jobscout.py setup` to create your own
+# search.toml from your resume, or copy this file to search.toml and edit that.
+# search.toml is git-ignored, so your preferences stay on your machine.
+
 # ---------------------------------------------------------------------------
 # Filters
 # ---------------------------------------------------------------------------
@@ -44,9 +48,8 @@ model = "claude-opus-5"
 effort = "high"          # low | medium | high | xhigh | max (lower = cheaper, faster)
 # What you're looking for, in plain words. Sent to Claude alongside your resumes.
 profile = """
-Engineering Manager roles in platform engineering, infrastructure, CI/CD, developer
-experience, or AI/ML platform teams. People-manager roles only, not IC.
-Location: DFW area onsite/hybrid (McKinney, Plano, Frisco, Dallas and nearby) or US-remote.
+Example: Engineering Manager roles on platform or infrastructure teams, people-manager only.
+Onsite/hybrid in the Dallas-Fort Worth area or US-remote.
 """
 
 # ---------------------------------------------------------------------------

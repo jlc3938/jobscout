@@ -10,3 +10,6 @@ resumes/*
 !resumes/.gitkeep
 *.docx
 *.pdf
+
+# Your search (created by `python jobscout.py setup`); may contain personal preferences.
+search.toml
