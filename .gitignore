@@ -1,0 +1,12 @@
+jobs.db
+output/
+.env
+__pycache__/
+*.pyc
+.venv/
+
+# Resumes contain personal info; each user supplies their own locally.
+resumes/*
+!resumes/.gitkeep
+*.docx
+*.pdf

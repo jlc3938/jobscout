@@ -1,0 +1,114 @@
+# ---------------------------------------------------------------------------
+# Filters
+# ---------------------------------------------------------------------------
+[filters]
+# Regexes matched against job titles (case-insensitive). A job must match at
+# least one include and no excludes.
+title_include = [
+  "engineering manager",
+  "manager,? (of )?(software )?engineering",
+  "software engineering manager",
+  "manager.*(platform|infrastructure|developer (experience|productivity)|devops|sre|reliability)",
+  "(platform|infrastructure|developer experience|devex|ai|ml) .*manager",
+  "head of (platform|infrastructure|engineering)",
+  "director.*(engineering|platform|infrastructure)",
+]
+title_exclude = [
+  "intern", "product manager", "program manager", "project manager",
+  "account", "sales", "marketing", "recruit", "customer success",
+  "technical account", "solutions", "partner manager", "hardware",
+]
+
+# A job's location must contain one of these, OR be remote (if allowed).
+locations = [
+  "mckinney", "plano", "frisco", "allen", "richardson", "dallas", "irving",
+  "addison", "fort worth", "las colinas", "westlake", "texas", ", tx",
+]
+allow_remote = true
+# Remote roles tied to these regions are dropped.
+remote_exclude = [
+  "canada", "uk", "united kingdom", "london", "europe", "emea", "india",
+  "apac", "australia", "germany", "ireland", "brazil", "latam", "singapore",
+]
+# Keep jobs with blank or "N Locations" text so you can check them by hand.
+keep_unknown_location = true
+
+# Workday needs search terms; it returns every job otherwise.
+workday_search = ["engineering manager", "software engineering manager", "director of engineering"]
+
+# ---------------------------------------------------------------------------
+# Companies
+# Find a company's board from its careers page links:
+#   boards.greenhouse.io/<token>  or job-boards.greenhouse.io/<token>  -> ats = "greenhouse"
+#   jobs.lever.co/<token>                                              -> ats = "lever"
+#   jobs.ashbyhq.com/<token>                                           -> ats = "ashby"
+#   <tenant>.wd<N>.myworkdayjobs.com/<site>                            -> ats = "workday"
+# Run `python jobscout.py check` after editing; fix or delete any FAIL rows.
+# ---------------------------------------------------------------------------
+
+# --- Greenhouse ---
+[[company]]
+name = "Anthropic"
+ats = "greenhouse"
+token = "anthropic"
+
+[[company]]
+name = "Stripe"
+ats = "greenhouse"
+token = "stripe"
+
+[[company]]
+name = "Datadog"
+ats = "greenhouse"
+token = "datadog"
+
+[[company]]
+name = "Cloudflare"
+ats = "greenhouse"
+token = "cloudflare"
+
+[[company]]
+name = "GitLab"
+ats = "greenhouse"
+token = "gitlab"
+
+[[company]]
+name = "Robinhood"
+ats = "greenhouse"
+token = "robinhood"
+
+[[company]]
+name = "Figma"
+ats = "greenhouse"
+token = "figma"
+
+# --- Ashby ---
+[[company]]
+name = "Plaid"
+ats = "ashby"
+token = "plaid"
+
+[[company]]
+name = "Ramp"
+ats = "ashby"
+token = "ramp"
+
+[[company]]
+name = "OpenAI"
+ats = "ashby"
+token = "openai"
+
+[[company]]
+name = "Linear"
+ats = "ashby"
+token = "linear"
+
+# --- Workday (most large DFW banks and enterprises) ---
+# host = the part before the first "/" in the careers URL
+# site = the first path segment after the host
+[[company]]
+name = "Capital One"
+ats = "workday"
+host = "capitalone.wd12.myworkdayjobs.com"
+tenant = "capitalone"
+site = "Capital_One"
