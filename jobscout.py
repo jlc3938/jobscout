@@ -351,9 +351,12 @@ Return:
   or jobs.ashbyhq.com/<token>). Every guess is checked against the live board; wrong ones are dropped."""
 
 DEFAULT_TITLE_EXCLUDE = ["intern", "sales", "account", "marketing", "recruit", "customer success",
-                         "product manager", "program manager", "project manager"]
+                         "product manager", "program manager", "project manager", "finance",
+                         "business development", "success manager"]
 DEFAULT_REMOTE_EXCLUDE = ["canada", "uk", "united kingdom", "london", "europe", "emea", "india",
-                          "apac", "australia", "germany", "ireland", "brazil", "latam", "singapore"]
+                          "apac", "australia", "germany", "ireland", "brazil", "latam", "singapore",
+                          "spain", "sweden", "france", "netherlands", "poland", "portugal",
+                          "switzerland", "israel", "japan", "china", "new zealand"]
 
 
 def ask(prompt, default=""):
@@ -566,7 +569,19 @@ def load_env():
             os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
-def digest_html(jobs, extra, generated):
+def run_status(run, still_open):
+    """One-line summary of the fetch that preceded this digest, plus any company failures."""
+    lines = []
+    if run:
+        lines.append(f"Checked {run['companies']} companies ({run['scanned']} postings). "
+                     f"{still_open} job{'s' if still_open != 1 else ''} still open in your report.")
+        lines += [f"Couldn't load {f}" for f in run["failures"]]
+    else:
+        lines.append(f"{still_open} job{'s' if still_open != 1 else ''} still open in your report.")
+    return lines
+
+
+def digest_html(jobs, extra, generated, status):
     rows = []
     for j in jobs:
         score = "" if j["score"] is None else (
@@ -581,26 +596,35 @@ def digest_html(jobs, extra, generated):
             f'<div style="color:#5d6677;font-size:13px">{escape(j["location"] or "Location not listed")}</div>'
             f'{fit}</td></tr>')
     more = (f'<p style="color:#5d6677">+ {extra} more in the attached report.</p>' if extra else "")
+    n = len(jobs) + extra
+    heading = f'{n} new job{"s" if n != 1 else ""}' if n else "No new jobs today"
+    table = f'<table style="width:100%;border-collapse:collapse">{"".join(rows)}</table>' if rows else ""
+    status_html = "".join(
+        f'<p style="color:{"#a33a3a" if line.startswith("Couldn") else "#5d6677"};margin:4px 0;'
+        f'font-size:13px">{escape(line)}</p>' for line in status)
     return (f'<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:640px;color:#1d2330">'
-            f'<h2 style="margin:0 0 4px">{len(jobs) + extra} new job{"s" if len(jobs) + extra != 1 else ""}</h2>'
+            f'<h2 style="margin:0 0 4px">{heading}</h2>'
             f'<p style="color:#5d6677;margin:0 0 8px;font-size:13px">jobscout · {generated}</p>'
-            f'<table style="width:100%;border-collapse:collapse">{"".join(rows)}</table>{more}'
+            f'{table}{more}<div style="margin-top:12px">{status_html}</div>'
             f'<p style="color:#5d6677;font-size:12px">Open the attached jobs.html for search, filters, '
             f'and full descriptions.</p></div>')
 
 
-def digest_text(jobs, extra):
-    lines = []
+def digest_text(jobs, extra, status):
+    lines = [] if jobs else ["No new jobs today."]
     for j in jobs:
         score = "" if j["score"] is None else f"[{j['score']}] "
         lines.append(f"{score}{j['company']}: {j['title']}\n  {j['location']}\n  {j['url']}")
     if extra:
         lines.append(f"+ {extra} more in the attached report.")
+    lines.append("\n".join(status))
     return "\n\n".join(lines)
 
 
-def send_digest(cfg, dry_run=False):
-    """Email new jobs that haven't been emailed yet. Returns how many were included."""
+def send_digest(cfg, dry_run=False, run=None):
+    """Email new jobs that haven't been emailed yet; with always_send, email even when there are
+    none so a missing email means something broke. `run` is cmd_run's summary, when there was one.
+    Returns how many jobs were included."""
     opts = cfg.get("digest", {})
     min_score, max_jobs = opts.get("min_score", 0), opts.get("max_jobs", 15)
     con = db()
@@ -610,12 +634,14 @@ def send_digest(cfg, dry_run=False):
         "SELECT * FROM jobs WHERE status = 'new' AND emailed_at IS NULL"
         " AND (score IS NULL OR score >= ?)"
         " ORDER BY score IS NULL, score DESC, first_seen DESC", (min_score,)).fetchall()
-    if not rows:
+    if not rows and not opts.get("always_send", True):
         print("Digest: nothing new to send.")
         return 0
+    still_open = con.execute("SELECT COUNT(*) FROM jobs WHERE status = 'new'").fetchone()[0]
+    status = run_status(run, still_open)
     shown, extra = rows[:max_jobs], max(0, len(rows) - max_jobs)
     generated = datetime.now().strftime("%Y-%m-%d %H:%M")
-    html_body = digest_html(shown, extra, generated)
+    html_body = digest_html(shown, extra, generated, status)
     OUT_DIR.mkdir(exist_ok=True)
     DIGEST_PREVIEW.write_text(html_body, encoding="utf-8")
     if dry_run:
@@ -630,9 +656,10 @@ def send_digest(cfg, dry_run=False):
     to = os.environ.get("JOBSCOUT_EMAIL_TO", sender)
 
     msg = EmailMessage()
-    msg["Subject"] = f"jobscout: {len(rows)} new job{'s' if len(rows) != 1 else ''} ({generated[:10]})"
+    count = f"{len(rows)} new job{'s' if len(rows) != 1 else ''}" if rows else "no new jobs"
+    msg["Subject"] = f"jobscout: {count} ({generated[:10]})"
     msg["From"], msg["To"] = sender, to
-    msg.set_content(digest_text(shown, extra))
+    msg.set_content(digest_text(shown, extra, status))
     msg.add_alternative(html_body, subtype="html")
     write_report(cfg)
     msg.add_attachment(REPORT.read_bytes(), maintype="text", subtype="html", filename="jobs.html")
@@ -646,7 +673,7 @@ def send_digest(cfg, dry_run=False):
     now = datetime.now().isoformat(timespec="seconds")
     con.executemany("UPDATE jobs SET emailed_at = ? WHERE id = ?", [(now, r["id"]) for r in rows])
     con.commit()
-    print(f"Digest: emailed {len(rows)} job(s) to {to}.")
+    print(f"Digest: emailed {len(rows)} new job(s) to {to}.")
     return len(rows)
 
 
@@ -707,6 +734,8 @@ def cmd_run(_):
             print("  " + f_)
     write_report(cfg)
     print(f"\nReport: {REPORT}")
+    return {"companies": len(cfg["company"]), "scanned": scanned, "new": len(new),
+            "failures": failures}
 
 
 def cmd_check(_):
@@ -831,9 +860,9 @@ def cmd_digest(a):
 
 
 def cmd_daily(_):
-    cmd_run(None)
+    run = cmd_run(None)
     print()
-    send_digest(load_config())
+    send_digest(load_config(), run=run)
 
 
 def cmd_report(a):

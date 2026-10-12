@@ -21,6 +21,9 @@ title_exclude = [
   "intern", "product manager", "program manager", "project manager",
   "account", "sales", "marketing", "recruit", "customer success",
   "technical account", "solutions", "partner manager", "hardware",
+  "finance", "business development", "partner development", "success manager",
+  "district manager", "sourcing", "field engineering", "product management",
+  "deployment manager",
 ]
 
 # A job's location must contain one of these, OR be remote (if allowed).
@@ -33,6 +36,11 @@ allow_remote = true
 remote_exclude = [
   "canada", "uk", "united kingdom", "london", "europe", "emea", "india",
   "apac", "australia", "germany", "ireland", "brazil", "latam", "singapore",
+  "spain", "sweden", "france", "netherlands", "poland", "portugal", "switzerland",
+  "denmark", "norway", "finland", "italy", "austria", "belgium", "czech", "romania",
+  "israel", "japan", "korea", "china", "argentina", "colombia", "new zealand",
+  "amsterdam", "berlin", "dublin", "toronto", "vancouver", "tel aviv", "tokyo",
+  "bangalore", "bengaluru", "hyderabad", "sydney", "madrid", "stockholm", "warsaw",
 ]
 # Keep jobs with blank or "N Locations" text so you can check them by hand.
 keep_unknown_location = true
@@ -59,6 +67,7 @@ Onsite/hybrid in the Dallas-Fort Worth area or US-remote.
 [digest]
 min_score = 0     # once scoring is on, e.g. 70; unscored jobs are always included
 max_jobs = 15     # jobs listed in the email body; the rest are in the attached report
+always_send = true   # email every day, even with no new jobs, so a missing email means a problem
 
 # ---------------------------------------------------------------------------
 # Companies

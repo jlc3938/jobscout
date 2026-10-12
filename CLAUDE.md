@@ -24,7 +24,8 @@ Do not add auto-apply, LinkedIn/Indeed scraping, or anything that submits forms.
   `search.example.toml` is the committed example. Run `check` after editing companies.
 - `digest` emails new, not-yet-emailed jobs (column `emailed_at`) via Gmail SMTP; addresses and
   the app password come from `.env` (see `.env.example`), never `search.toml`. `daily` = run +
-  digest and is what the 7 AM launchd job calls.
+  digest and is what the 7 AM launchd job calls; with `[digest] always_send` (default true) it
+  emails every day, including run stats and failed companies, even when nothing is new.
 - `check` verified against live boards (2026-09-23). `score` tested only with a mocked client so far.
 
 ## Scoring
