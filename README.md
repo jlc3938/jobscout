@@ -6,7 +6,7 @@ your resume with Claude, and emails you a daily digest. You review and apply to 
 nothing is submitted automatically.
 
 ```
-check -> run -> (score) -> report / digest -> you review and apply -> mark
+setup -> check -> run -> (score) -> report / digest -> you review and apply -> mark
 ```
 
 ## Setup
@@ -45,7 +45,7 @@ Everything is stored in `jobs.db` (SQLite) and `output/`, both git-ignored.
 | `run` | Fetch postings, filter them, save new matches, refresh the report |
 | `score [--limit N] [--rescore] [--id ID]` | Rate new jobs against your resumes with Claude |
 | `report [--open]` | Write `output/jobs.html`: search, filters, descriptions, scores |
-| `digest [--dry-run]` | Email new jobs you haven't been sent yet |
+| `digest [--dry-run]` | Email new jobs you haven't been sent yet (or a "no new jobs" note) |
 | `daily` | `run` + `digest`; what the 7 AM schedule calls |
 | `list [--status S] [--min-score N]` | Print tracked jobs in the terminal |
 | `mark <id> <status>` | Set a job's status: applied, skipped, interviewing... |

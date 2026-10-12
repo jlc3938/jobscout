@@ -269,7 +269,12 @@ python jobscout.py digest [--dry-run]
 
 Emails jobs that are `new` and haven't been emailed yet, then marks them as emailed so they never
 repeat. Jobs are ordered by score (unscored jobs last); the email body lists the top `max_jobs` and
-the full `jobs.html` report is attached. If nothing is new, no email is sent.
+the full `jobs.html` report is attached.
+
+By default an email goes out even when nothing is new ("jobscout: no new jobs"), so a missing email
+means something went wrong. When run from `daily`, the email also says how many companies and
+postings were checked, how many jobs are still open, and which companies failed to load. Set
+`always_send = false` to only email when there are new jobs.
 
 | Option | Effect |
 |---|---|
@@ -281,6 +286,7 @@ Settings under `[digest]` in `search.toml`:
 |---|---|---|
 | `min_score` | `0` | Leave out scored jobs below this. Unscored jobs are always included. |
 | `max_jobs` | `15` | Jobs listed in the email body; the rest are counted and are in the attachment. |
+| `always_send` | `true` | Email every time, even with no new jobs. `false` = only when there are new jobs. |
 
 Email settings go in `.env` (copy `.env.example`), not `search.toml`:
 
@@ -305,7 +311,9 @@ Reads: `search.toml`, `.env`, `jobs.db`. Writes: `jobs.db` (emailed_at), `output
 python jobscout.py daily
 ```
 
-Runs `run`, then `digest`. This is the command to schedule; see
+Runs `run`, then `digest`, and puts the run's results (companies checked, failures) in the email.
+A full run takes several minutes with a long company list; Workday boards are the slowest.
+This is the command to schedule; see
 [Run it automatically](README.md#run-it-automatically). Add `score` in between once you want scored
 digests.
 
